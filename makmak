@@ -14,7 +14,7 @@ local POSITION_3 = Vector3.new(-4968.01562, 41281.78906, -3650.59204)
 
 local TWEEN_SPEED = 80
 local NEXT_EGG_WAIT_TIME = 15
-local TOP_WAIT_TIME = 10
+local TOP_WAIT_TIME = 15
 
 local SYSTEM_ENABLED = true
 local AUTO_LM = true
@@ -241,20 +241,17 @@ local function processVolcanic(egg)
 		return
 	end
 
+	-- 1. P1 → P3
 	teleportToPosition(POSITION_1)
 	task.wait(0.2)
-
-	if not egg.Parent then
-		teleportToOwnPlot()
-		return
-	end
 
 	if not tweenToPosition(POSITION_3) then
 		return
 	end
 
-	task.wait(0.1)
+	task.wait(0.2)
 
+	-- 2. Go to volcanic egg
 	if not egg.Parent then
 		teleportToOwnPlot()
 		return
@@ -271,6 +268,7 @@ local function processVolcanic(egg)
 
 	notify("At volcanic egg - waiting for disappearance")
 
+	-- 3. Wait until egg disappears
 	local disappeared = waitForEggToDisappear(egg)
 
 	if not SYSTEM_ENABLED then
@@ -282,14 +280,32 @@ local function processVolcanic(egg)
 		return
 	end
 
-	if AUTO_LM then
-		notify("Volcanic egg disappeared - going VolcanoTop")
+	notify("Volcanic egg disappeared")
 
-		if teleportToVolcanoTop() then
-			task.wait(TOP_WAIT_TIME)
-		end
+	-- 4. Egg disappeared → P3
+	teleportToPosition(POSITION_3)
+	task.wait(0.2)
+
+	-- 5. P3 → P1
+	if not tweenToPosition(POSITION_1) then
+		return
 	end
 
+	task.wait(0.2)
+
+	-- 6. P1 → VolcanoTop
+	if not teleportToVolcanoTop() then
+		teleportToOwnPlot()
+		return
+	end
+
+	notify("At VolcanoTop - dip")
+
+	
+	-- 8. After dip finishes → wait 15 seconds
+	task.wait(TOP_WAIT_TIME)
+
+	-- 9. Return to own plot
 	teleportToOwnPlot()
 end
 
@@ -438,46 +454,53 @@ pcall(function()
 	end)
 end)
 
-local volcanoEvent
 
-pcall(function()
-	volcanoEvent =
-		ReplicatedStorage
-		:WaitForChild("packages")
-		:WaitForChild("Net")
-		:WaitForChild("RE/VolcanoDip")
+local wasInsideVolcano = false
+
+RunService.Heartbeat:Connect(function()
+	if not SYSTEM_ENABLED or not AUTO_LM then
+		wasInsideVolcano = false
+		return
+	end
+
+	local root = getRoot()
+	local topPosition = getVolcanoTopPosition()
+
+	if not root or not topPosition then
+		wasInsideVolcano = false
+		return
+	end
+
+	local distance = (root.Position - topPosition).Magnitude
+	local isInside = distance <= VOLCANO_RADIUS
+
+	if isInside and not wasInsideVolcano then
+task.wait(0.5)
+local Event = game:GetService("ReplicatedStorage").packages.Net["RE/VolcanoDip"]
+Event:FireServer()
+
+
+		wasInsideVolcano = true
+	elseif not isInside then
+		wasInsideVolcano = false
+	end
 end)
 
-if volcanoEvent then
-	RunService.Heartbeat:Connect(function()
-		if not SYSTEM_ENABLED or not AUTO_LM then
-			return
-		end
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
 
-		local root = getRoot()
-		local topPosition = getVolcanoTopPosition()
+local RenderedEggs = workspace:WaitForChild("RenderedEggs")
 
-		if not root or not topPosition then
-			return
-		end
+-- PROXIMITY EGG SYSTEM
 
-		local distance =
-			(root.Position - topPosition).Magnitude
-
-		if distance <= VOLCANO_RADIUS then
-			local now = os.clock()
-
-			if now - lastVolcanoFire >= VOLCANO_FIRE_COOLDOWN then
-				volcanoEvent:FireServer()
-				lastVolcanoFire = now
-			end
-		end
-	end)
-end
-
-local RADIUS = 15
+local RADIUS = 20
+local WAIT_BEFORE_PROXIMITY = 5
 local HOLD_DURATION = 2
 local REPEAT_COUNT = 3
+
+-- Prevents the same egg from creating
+-- hundreds of delayed tasks while nearby.
+local pendingEggs = {}
 
 local function findPrompt(egg)
 	for _, obj in ipairs(egg:GetDescendants()) do
@@ -489,34 +512,61 @@ local function findPrompt(egg)
 	return nil
 end
 
+local function getPromptPart(prompt, egg)
+	if not prompt or not prompt.Parent then
+		return nil
+	end
+
+	if prompt.Parent:IsA("BasePart") then
+		return prompt.Parent
+	end
+
+	if egg:IsA("BasePart") then
+		return egg
+	end
+
+	return egg:FindFirstChildWhichIsA(
+		"BasePart",
+		true
+	)
+end
+
 local function collectEgg(egg, prompt)
-	for i = 1, REPEAT_COUNT do
+	if not egg or not prompt then
+		return
+	end
+
+	for _ = 1, REPEAT_COUNT do
+		if not SYSTEM_ENABLED then
+			return
+		end
+
 		if not egg.Parent or not prompt.Parent then
-			break
+			return
 		end
 
 		local root = getRoot()
+		local promptPart =
+			getPromptPart(prompt, egg)
 
-		if not root then
-			break
+		if not root or not promptPart then
+			return
 		end
 
-		local promptPart
+		local distance =
+			(root.Position - promptPart.Position).Magnitude
 
-		if prompt.Parent:IsA("BasePart") then
-			promptPart = prompt.Parent
-		else
-			promptPart = prompt:FindFirstAncestorWhichIsA("BasePart")
+		if distance > RADIUS then
+			return
 		end
 
-		if promptPart then
-			local distance =
-				(root.Position - promptPart.Position).Magnitude
+		if prompt.Enabled then
+			prompt:InputHoldBegin()
 
-			if distance <= RADIUS then
-				fireproximityprompt(prompt, HOLD_DURATION)
-			else
-				break
+			task.wait(HOLD_DURATION)
+
+			if prompt.Parent then
+				prompt:InputHoldEnd()
 			end
 		end
 
@@ -524,44 +574,118 @@ local function collectEgg(egg, prompt)
 	end
 end
 
+-- Run proximity system separately so it DOES NOT
+-- block the GUI code below it.
 task.spawn(function()
+
 	while task.wait(0.1) do
+
+		if not SYSTEM_ENABLED then
+			continue
+		end
+
 		local root = getRoot()
 
-		if root then
-			for _, egg in ipairs(EggsFolder:GetChildren()) do
-				local prompt = findPrompt(egg)
+		if not root then
+			continue
+		end
 
-				if prompt then
-					local targetPart
+		for _, egg in ipairs(EggsFolder:GetChildren()) do
 
-					if prompt.Parent:IsA("BasePart") then
-						targetPart = prompt.Parent
-					else
-						targetPart =
-							egg:IsA("BasePart")
-							and egg
-							or egg:FindFirstChildWhichIsA("BasePart", true)
+			if not egg.Parent then
+				continue
+			end
+
+			local prompt = findPrompt(egg)
+
+			if not prompt then
+				continue
+			end
+
+			local promptPart =
+				getPromptPart(prompt, egg)
+
+			if not promptPart then
+				continue
+			end
+
+			local distance =
+				(root.Position - promptPart.Position).Magnitude
+
+			if distance <= RADIUS
+				and not pendingEggs[egg] then
+
+				-- Mark this egg as waiting.
+				pendingEggs[egg] = true
+
+				task.spawn(function()
+
+					-- Wait 5 seconds before holding
+					-- the proximity prompt.
+					task.wait(
+						WAIT_BEFORE_PROXIMITY
+					)
+
+					-- Re-check everything after 5 seconds.
+					if not SYSTEM_ENABLED then
+						pendingEggs[egg] = nil
+						return
 					end
 
-					if targetPart then
-						local distance =
-							(root.Position - targetPart.Position).Magnitude
-
-						if distance <= RADIUS then
-							task.spawn(
-								collectEgg,
-								egg,
-								prompt
-							)
-						end
+					if not egg.Parent then
+						pendingEggs[egg] = nil
+						return
 					end
-				end
+
+					if not prompt.Parent then
+						pendingEggs[egg] = nil
+						return
+					end
+
+					local currentRoot =
+						getRoot()
+
+					local currentPart =
+						getPromptPart(
+							prompt,
+							egg
+						)
+
+					if not currentRoot
+						or not currentPart then
+
+						pendingEggs[egg] = nil
+						return
+					end
+
+					local currentDistance =
+						(
+							currentRoot.Position
+							- currentPart.Position
+						).Magnitude
+
+					-- Only interact if still within 10 studs.
+					if currentDistance <= RADIUS then
+
+						collectEgg(
+							egg,
+							prompt
+						)
+					end
+
+					-- Allow this egg to be detected again
+					-- after the current attempt finishes.
+					pendingEggs[egg] = nil
+				end)
 			end
 		end
 	end
 end)
 
+-- Clean up references when an egg disappears.
+EggsFolder.ChildRemoved:Connect(function(egg)
+	pendingEggs[egg] = nil
+end)
 task.spawn(function()
 	local oldButton = playerGui:FindFirstChild("GulbeHelpButton")
 	if oldButton then
@@ -585,7 +709,7 @@ task.spawn(function()
 	helpButton.Position = UDim2.new(0.5, 0, 0.025, 0)
 	helpButton.Size = UDim2.new(0.16, 0, 0.055, 0)
 	helpButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	helpButton.TextColor3 = Color3.fromRGB(255, 220, 0)
+	helpButton.TextColor3 = Color3.fromRGB(876, 220, 0)
 	helpButton.Text = "HELP"
 	helpButton.TextScaled = true
 	helpButton.Font = Enum.Font.FredokaOne
@@ -641,7 +765,7 @@ task.spawn(function()
 		title.TextColor3 = Color3.fromRGB(255, 220, 0)
 		title.TextScaled = true
 		title.Font = Enum.Font.FredokaOne
-		title.ZIndex = 11
+		title.ZIndex =8
 		title.Parent = frame
 
 		local subtitle = Instance.new("TextLabel")
@@ -652,7 +776,7 @@ task.spawn(function()
 		subtitle.TextColor3 = Color3.fromRGB(200, 200, 200)
 		subtitle.TextScaled = true
 		subtitle.Font = Enum.Font.Gotham
-		subtitle.ZIndex = 11
+		subtitle.ZIndex = 8
 		subtitle.Parent = frame
 
 		local commands = {
@@ -661,8 +785,7 @@ task.spawn(function()
 			"*auto lm  →  Enable Auto Lava Mutation",
 			"*off auto lm  →  Disable Auto Lava Mutation",
 			"*addp [egg]  →  Add egg priority",
-			"*remp [egg]  →  Remove egg priority",
-			"*help  →  Open this menu"
+			"*remp [egg]  →  Remove egg priority"
 		}
 
 		local commandText = Instance.new("TextLabel")
@@ -676,7 +799,7 @@ task.spawn(function()
 		commandText.TextXAlignment = Enum.TextXAlignment.Left
 		commandText.TextYAlignment = Enum.TextYAlignment.Top
 		commandText.Font = Enum.Font.Gotham
-		commandText.ZIndex = 11
+		commandText.ZIndex = 8
 		commandText.Parent = frame
 
 		local close = Instance.new("TextButton")
@@ -688,7 +811,7 @@ task.spawn(function()
 		close.TextColor3 = Color3.fromRGB(255, 220, 0)
 		close.TextScaled = true
 		close.Font = Enum.Font.FredokaOne
-		close.ZIndex = 12
+		close.ZIndex = 8
 		close.Parent = frame
 
 		local closeCorner = Instance.new("UICorner")
@@ -723,5 +846,5 @@ task.spawn(function()
 end)
 
 task.wait(1)
-notify("Egg System loaded")
+notify("Gwapo makmak")
 loadstring(game:HttpGet("https://pastebin.com/raw/dcZL5YNK"))()
