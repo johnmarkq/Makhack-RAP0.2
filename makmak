@@ -16,13 +16,13 @@ local POSITION_3 = Vector3.new(-4968.01562, 41281.78906, -3650.59204)
 
 local TWEEN_SPEED = 80
 local NEXT_EGG_WAIT_TIME = 15
-local TOP_WAIT_TIME = 10
+local TOP_WAIT_TIME = 12
 
 local SYSTEM_ENABLED = true
 local AUTO_LM = true
 
-local VOLCANO_RADIUS = 10
-local VOLCANO_FIRE_COOLDOWN = 1
+local VOLCANO_RADIUS = 20
+local VOLCANO_FIRE_COOLDOWN = 0.5
 
 local busy = false
 local recovering = false
